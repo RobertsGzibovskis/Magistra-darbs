@@ -331,7 +331,7 @@ def plot_waterfall(exp, track_idx, user_idx, save_path=None):
         f'Prognozētais vērtējums lietotājam {user_idx}: {score:.3f}',
         fontsize=11, fontweight="bold", pad=14
     )
-    pos_p = mpatches.Patch(color=GREEN, label="Palielina Samazina varbūtību, ka tiks ieteikts")
+    pos_p = mpatches.Patch(color=GREEN, label="Palielina varbūtību, ka tiks ieteikts")
     neg_p = mpatches.Patch(color=RED,   label="Samazina varbūtību, ka tiks ieteikts")
     ax.legend(handles=[pos_p, neg_p], fontsize=9, loc="lower right")
     ax.grid(axis="x", linewidth=0.5)
