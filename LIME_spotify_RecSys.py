@@ -300,3 +300,46 @@ def parse_to_core(lime_dict, core_features):
                 result[fname] += v
                 break
     return result
+
+
+# 8.  Vizualizācija (Waterfall diagramma)
+ 
+def plot_waterfall(exp, track_idx, user_idx, save_path=None):
+    items   = sorted(exp.as_list(), key=lambda x: x[1])
+    labels  = [i[0] for i in items]
+    weights = [i[1] for i in items]
+    colors  = [GREEN if w >= 0 else RED for w in weights]
+ 
+    fig, ax = _base_fig(13, 8)
+    bars = ax.barh(labels, weights, color=colors, edgecolor="none", height=0.65)
+    ax.axvline(0, color="#555", linewidth=1.2)
+ 
+    for bar, w in zip(bars, weights):
+        ax.text(w + (0.001 if w >= 0 else -0.001),
+                bar.get_y() + bar.get_height()/2,
+                f"{w:+.4f}", va="center",
+                ha="left" if w >= 0 else "right",
+                color="white", fontsize=8)
+ 
+    m     = df.iloc[track_idx]
+    score = predictor(feature_matrix[track_idx:track_idx+1])[0]
+ 
+    ax.set_xlabel("LIME iezīmju ieguldījums", fontsize=11)
+    ax.set_title(
+        f'LIME izskaidrojums  ·  "{m["track_name"]}" — {m["artist_name"]}\n'
+        f'Žanrs: {m["genre"]}  ·  Valsts: {m["country"]}  ·  '
+        f'Prognozētais vērtējums lietotājam {user_idx}: {score:.3f}',
+        fontsize=11, fontweight="bold", pad=14
+    )
+    pos_p = mpatches.Patch(color=GREEN, label="Palielina Samazina varbūtību, ka tiks ieteikts")
+    neg_p = mpatches.Patch(color=RED,   label="Samazina varbūtību, ka tiks ieteikts")
+    ax.legend(handles=[pos_p, neg_p], fontsize=9, loc="lower right")
+    ax.grid(axis="x", linewidth=0.5)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"  Saved: {save_path}")
+    plt.show()
+
+plot_waterfall(explanation, TARGET_TRACK, TARGET_USER,
+               save_path=os.path.join(OUT, "lime_spotify_waterfall.png"))
