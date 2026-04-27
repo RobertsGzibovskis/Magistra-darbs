@@ -20,17 +20,15 @@ RANDOM_SEED  = 42
 
 TARGET_USER  = 7      # lietotājs, kuram tiek skaidrots ieteikums
 TARGET_TRACK = 1042   # dziesma, kurai tiek skaidrots ieteikums
-LIME_TOP_FEATURES = 15
+LIME_TOP_FEATURES = 8
 LIME_NUM_SAMPLES  = 2000
 LIME_BACKGROUND_N = 2000   # paraugu skaits matricai
 
 # Novērtēšanas parametri
 
-EVAL_DELTA        = 0.05   # D metrika — tolerance
+
 EVAL_D_SAMPLES    = 300
 EVAL_D_NOISE      = 0.05
-EVAL_R_THRESHOLD  = 5      # R metrika — max pieļaujamais noteikumu skaits
-EVAL_F_THRESHOLD  = 5      # F metrika — max pieļaujamais iezīmju skaits
 EVAL_S_TRIALS     = 7      # S metrika — perturbāciju skaits
 EVAL_S_NOISE      = 0.03
 EVAL_LAMBDA       = 1.0    # soda koeficients visām metrikām

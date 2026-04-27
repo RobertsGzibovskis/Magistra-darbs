@@ -22,9 +22,6 @@ def main():
 
     feature_matrix, feature_names, scaler = data.build_feature_matrix(df)
 
-    N_TRACKS  = len(df)
-    GENRES    = df["genre"].unique().tolist()
-    COUNTRIES = df["country"].unique().tolist()
 
     # Lietotāju simulācija
     plays_df, R, user_genre, user_country = data.simulate_users(
@@ -73,6 +70,7 @@ def main():
     predictor = make_predictor(TARGET_USER)
     instance  = feature_matrix[TARGET_TRACK]
 
+    np.random.seed(config.RANDOM_SEED)
     explanation = explainer.explain_instance(
         data_row    = instance,
         predict_fn  = predictor,
@@ -88,76 +86,87 @@ def main():
         print(f"  {sign}{feat:45s}  {weight:+.5f}")
 
     # Batch izskaidrojumi (viens paraugs katram žanram)
-    genre_samples = {}
-    for g in sorted(GENRES):
-        idxs = df[df["genre"] == g].index.tolist()
-        genre_samples[g] = idxs[0]
-
-    print(f"\nBatch izskaidrojumu analīze — {len(genre_samples)} žanri …")
-    batch_exps = {}
-    for g, tidx in genre_samples.items():
-        exp = explainer.explain_instance(
-            feature_matrix[tidx], predictor,
-            num_features=len(data.AUDIO_CORE),
-            num_samples=600
-        )
-        batch_exps[g] = dict(exp.as_list())
-
-    # Novērtēšanas metrikas D, R, F, S
-
-    print("LIME XAI — NOVĒRTĒŠANAS METRIKAS  (D, R, F, S)")
-   
-
-    np.random.seed(0)
-
-    d_results = evaluation.evaluate_D(
-        instance, predictor, explainer, feature_names,
-        delta     = config.EVAL_DELTA,
-        n_samples = config.EVAL_D_SAMPLES,
-        noise_std = config.EVAL_D_NOISE
+        np.random.seed(config.RANDOM_SEED + 1)
+    explanation_2 = explainer.explain_instance(
+        data_row    = instance,
+        predict_fn  = predictor,
+        num_features= config.LIME_TOP_FEATURES,
+        num_samples = config.LIME_NUM_SAMPLES
     )
 
-    r_results = evaluation.evaluate_R(
-        explanation,
-        c   = config.EVAL_R_THRESHOLD,
-        lam = config.EVAL_LAMBDA
-    )
 
-    f_results = evaluation.evaluate_F(
-        explanation, feature_names,
-        f_threshold = config.EVAL_F_THRESHOLD,
-        lam         = config.EVAL_LAMBDA
-    )
+    # Novērtēšanas metrikas 
 
-    s_results = evaluation.evaluate_S(
-        instance, predictor, explainer, feature_names,
-        n_trials    = config.EVAL_S_TRIALS,
-        noise_std   = config.EVAL_S_NOISE,
-        lam         = config.EVAL_LAMBDA,
-        num_features= 10,
-        num_samples = 500
-    )
-
-    # Kopsavilkums 
     print("\n")
-    print("NOVĒRTĒŠANAS KOPSAVILKUMS")
+    print("LIME XAI — NOVERTESANAS METRIKAS")
+ 
+    np.random.seed(0)
+ 
+    # 1. Uziticamība (Fidelity)
+    fidelity_results = evaluation.evaluate_fidelity(
+        instance, predictor, explanation, feature_names,
+    )
+ 
+    # 2. Vienkāršība/sarežgītība (Simplicity)
 
+    explanation_full = explainer.explain_instance(
+        data_row    = instance,
+        predict_fn  = predictor,
+        num_features= len(feature_names),  
+        num_samples = config.LIME_NUM_SAMPLES,
+    )
+
+    simplicity_results = evaluation.evaluate_simplicity(
+        explanation_full, feature_names,
+        thresholds=(0.10, 0.05, 0.01),
+    )
+ 
+    # 3. Patstāvīgums (Consistency)   divi LIME skaidrojumi tam pašam vienumam
+    consistency_results = evaluation.evaluate_consistency(
+        explanation_1=explanation,
+        explanation_2=explanation_2,
+        feature_names=feature_names,
+        k=5,
+        name_1="LIME (seed 42)",
+        name_2="LIME (seed 43)",
+    )
+ 
+    # 4. Izturība (Robustness) sigma=0.01
+    robustness_results = evaluation.evaluate_robustness(
+        instance, predictor, explainer, feature_names,
+        n_trials  =config.EVAL_S_TRIALS,
+        sigma     =0.01,
+        n_features=config.LIME_TOP_FEATURES,
+        n_samples =config.LIME_NUM_SAMPLES,
+    )
+ 
+    # Kopsavilkums
+ 
+    print("\n")
+    print("NOVERTESANAS KOPSAVILKUMS")
+    print("\n")
+ 
     summary = {
-        "D — Melnā kaste nepieciešama" : "Jā" if d_results["Melnā kaste nepieciešama"] else "Nē",
-        "D — Pb (melnā kaste R²)"      : d_results["Pb (melnās kastes R²)"],
-        "D — Pt (caurspīdīgais R²)"    : d_results["Pt (caurspīdīgā modeļa R²)"],
-        "R — Noteikumu skaits"         : r_results["Noteikumu skaits (m)"],
-        "R — R vērtība (sods)"         : r_results["R = λ * L"],
-        "F — Iezīmju skaits"           : f_results["Unikālās pamata iezīmes (f_used)"],
-        "F — F vērtība (sods)"         : f_results["F = λ * max(0, f_used - f_thresh)"],
-        "S — Vidējā Jaccard līdzība"   : s_results["Vidējā Jaccard līdzība"],
-        "S — Vidējā Tanimoto līdzība"  : s_results["Vidējā Tanimoto līdzība"],
-        "S — S_Jaccard"                : s_results["S_jaccard  = λ*(1 − mean_J)"],
-        "S — S_Tanimoto"               : s_results["S_tanimoto = λ*(1 − mean_T)"],
-        "S — Novērtējums"              : s_results["Stabilitātes novērtējums (J)"],
+        
+        "Fidelity | P_h(x)  [modelis]"   : fidelity_results["fidelity_P_h"],
+        "Fidelity | P_Mh(x) [surrogate]" : fidelity_results["fidelity_P_Mh"],
+        "Fidelity | Score"               : fidelity_results["fidelity_score"],
+        "Fidelity | Decision"            : fidelity_results["fidelity_decision"],
+        "Fidelity | Final"               : fidelity_results["fidelity_score_verdict"],
+        
+        "Simplicity | tau=0.10"          : simplicity_results["simplicity_tau_010"],
+        "Simplicity | tau=0.05"          : simplicity_results["simplicity_tau_005"],
+        "Simplicity | tau=0.01"          : simplicity_results["simplicity_tau_001"],
+        
+        "Consistency | C(M1,M2)"         : consistency_results["consistency_score"],
+        "Consistency | Final"            : consistency_results["consistency_verdict"],
+        
+        "Robustness | R_attr"            : robustness_results["robustness_score"],
+        "Robustness | Std"               : robustness_results["robustness_std"],
+        "Robustness | Final"             : robustness_results["robustness_verdict"],
     }
     for k, v in summary.items():
-        print(f"  {k:42s}: {v}")
+        print(f"  {k:40s}: {v}")
 
 
 if __name__ == "__main__":

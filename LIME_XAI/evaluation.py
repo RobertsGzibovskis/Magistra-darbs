@@ -1,297 +1,280 @@
 # evaluation.py
-# LIME XAI novērtēšanas metrikas: D, R, F, S
-#
-# D — Melnās kastes nepieciešamība  (Black-box Necessity)
-# R — Noteikumu sarežģītība         (Rule complexity)
-# F — Iezīmju sarežģītība           (Feature complexity)
-# S — Stabilitāte                   (Stability — Jaccard & Tanimoto)
+
+#   1. FIDELITY      — Score fidelity (Eq.1) + Decision fidelity (Eq.2)
+#   2. SIMPLICITY    — Relative-threshold sparsity (Eq.3), τ ∈ {0.10, 0.05, 0.01}
+#   3. CONSISTENCY   — Depth-averaged Spearman over top-k=5 (Eq.4)
+#   4. ROBUSTNESS    — Mean L1 change under Gaussian noise σ=0.01 (Eq.5)
 
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-
-from sklearn.linear_model import Ridge
-from sklearn.metrics import r2_score
+from scipy.stats import spearmanr
 
 import config
 
-# Palīgfunkcijas
-
-  # Izveido perturbētus paraugus ap doto punktu.
-  # Gausa troksnis (std=noise_std), apgriezts intervālā [0, 1].
-def _perturb_instance(instance: np.ndarray, n_samples: int = 200,
-                      noise_std: float = 0.05) -> np.ndarray:
-    
-    noise = np.random.normal(0, noise_std, size=(n_samples, len(instance)))
-    return np.clip(instance + noise, 0, 1)
-
-#  Atgriež to LIME iezīmju kopu, kuru |svars| > threshold.
-def _feature_set(lime_dict: dict, threshold: float = 0.0) -> set:
-    return {k for k, v in lime_dict.items() if abs(v) > threshold}
-
-# Jaccard līdzība starp divām kopām.
-# J(A, B) = |A ∩ B| / |A ∪ B|
-def _jaccard(set_a: set, set_b: set) -> float:
-    if not set_a and not set_b:
-        return 1.0
-    union = len(set_a | set_b)
-    return len(set_a & set_b) / union if union > 0 else 0.0
-
-# Tanimoto (ģeneralizētais Jaccard) koeficients nepārtrauktiem vektoriem.
-# T(a, b) = dot(a,b) / (||a||² + ||b||² − dot(a,b))
-
-def _tanimoto(vec_a: np.ndarray, vec_b: np.ndarray) -> float:
-   
-    dot   = np.dot(vec_a, vec_b)
-    denom = np.dot(vec_a, vec_a) + np.dot(vec_b, vec_b) - dot
-    return float(dot / denom) if denom != 0 else 1.0
-
-
-
-# D — Melnās kastes nepieciešamība
-# Pb  = melnās kastes modeļa sniegums (R²)
-# Pt  = caurspīdīgā (LIME surogāts) modeļa sniegums (R²)
-# δ   = pieļaujamais snieguma samazinājums
-# Lēmums: ja Pb − δ ≤ Pt → melnā kaste NAV nepieciešama
-
-def evaluate_D(instance, predictor, explainer, feature_names,
-               delta=config.EVAL_DELTA,
-               n_samples=config.EVAL_D_SAMPLES,
-               noise_std=config.EVAL_D_NOISE) -> dict:
-    print("\n")
-    print("D METRIKA — Melnās kastes nepieciešamība")
-  
-    X_local = _perturb_instance(instance, n_samples=n_samples,
-                                noise_std=noise_std)
-    y_black = predictor(X_local)
-
-    split = int(0.8 * n_samples)
-    X_tr, X_te = X_local[:split], X_local[split:]
-    y_tr, y_te = y_black[:split], y_black[split:]
-
-    bb_model = Ridge(alpha=1.0)
-    bb_model.fit(X_tr, y_tr)
-    Pb = max(0.0, r2_score(y_te, bb_model.predict(X_te)))
-
-    exp = explainer.explain_instance(instance, predictor,
-                                     num_features=10, num_samples=500)
-    lime_feat_idx = []
-    for feat_name, _ in exp.as_list():
-        for j, fn in enumerate(feature_names):
-            if fn in feat_name:
-                lime_feat_idx.append(j)
-                break
-    lime_feat_idx = list(set(lime_feat_idx))
-
-    if lime_feat_idx:
-        trans_model = Ridge(alpha=1.0)
-        trans_model.fit(X_tr[:, lime_feat_idx], y_tr)
-        Pt = max(0.0, r2_score(y_te, trans_model.predict(X_te[:, lime_feat_idx])))
+# Izvelk LIME surogāta svaru vektoru w un konstanti w0.
+# Palīgfunkcijas 
+def _get_surrogate_weights_and_intercept(explanation, feature_names):
+    intercept_raw = getattr(explanation, "intercept", {})
+    if isinstance(intercept_raw, dict):
+        w0 = float(list(intercept_raw.values())[0]) if intercept_raw else 0.0
     else:
-        Pt = 0.0
+        w0 = float(intercept_raw) if intercept_raw else 0.0
 
-    necessary = (Pb - delta) > Pt
-    verdict   = ("Jā — melnā kaste ir nepieciešama (Pb − δ > Pt)"
-                 if necessary else
-                 "Nē — pietiek ar caurspīdīgo modeli (Pb − δ ≤ Pt)")
-
-    result = {
-        "Pb (melnās kastes R²)"      : round(Pb, 4),
-        "Pt (caurspīdīgā modeļa R²)" : round(Pt, 4),
-        "δ (tolerance)"              : delta,
-        "Pb - δ"                     : round(Pb - delta, 4),
-        "Melnā kaste nepieciešama"  : necessary,
-        "Lēmums"                     : verdict,
-    }
-    for k, v in result.items():
-        print(f"  {k:40s}: {v}")
-    return result
-
-
-
-# R — Noteikumu sarežģītība
-
-#  R = λ * L,  L = max(0, size(m) − c)
-#  size(m) = noteikumu skaits LIME skaidrojumā
-#  c       = pieļaujamais noteikumu skaits
-#  Jo mazāks R, jo saprotamāks skaidrojums.
-  
-def evaluate_R(exp,
-               c=config.EVAL_R_THRESHOLD,
-               lam=config.EVAL_LAMBDA) -> dict:
-  
-    print("\n")
-    print("R METRIKA — Noteikumu sarežģītība")
-    
-
-    rules   = exp.as_list()
-    m       = len(rules)
-    L       = max(0, m - c)
-    R_score = lam * L
-
-    print(f"\n  Noteikumu saraksts (m={m}):")
-    for i, (feat, weight) in enumerate(
-            sorted(rules, key=lambda x: abs(x[1]), reverse=True), 1):
-        print(f"    {i:2d}. {feat:45s}  {weight:+.5f}")
-
-    result = {
-        "Noteikumu skaits (m)"        : m,
-        "Pieļaujamais skaits (c)"     : c,
-        "Pārsniegums L = max(0, m-c)" : L,
-        "λ (soda koeficients)"        : lam,
-        "R = λ * L"                   : round(R_score, 4),
-        "Interpretācija"              : (
-            "Skaidrojums ir pietiekami kompakts"
-            if R_score == 0 else
-            f"Skaidrojums ir pārāk sarežģīts — {L} lieki noteikumi"
-        ),
-    }
-
-    print()
-    for k, v in result.items():
-        print(f"  {k:40s}: {v}")
-
-    return result
-
-
-# F — Iezīmju sarežģītība
-#  F = λ * max(0, f_used − f_threshold)
-#  f_used = unikālo pamata iezīmju skaits skaidrojumā
-#  Jo mazāk iezīmju, jo skaidrāks skaidrojums.
-   
-def evaluate_F(exp, feature_names,
-               f_threshold=config.EVAL_F_THRESHOLD,
-               lam=config.EVAL_LAMBDA) -> dict:
-    
-    print("\n")
-    print("F METRIKA — Iezīmju sarežģītība")
-    lime_dict = dict(exp.as_list())
-
-    used_base = set()
-    for lime_key in lime_dict:
-        for fname in feature_names:
-            if fname in lime_key:
-                used_base.add(fname)
+    w = np.zeros(len(feature_names))
+    for feat_str, val in explanation.as_list():
+        for j, fn in enumerate(feature_names):
+            if fn in feat_str:
+                w[j] = val
                 break
+    return w, w0
 
-    f_used   = len(used_base)
-    excess   = max(0, f_used - f_threshold)
-    F_score  = lam * excess
+# g(x) = w0 + x @ w  — surogāta modeļa prognoze vienam vektoram.
+def _surrogate_score(w, w0, x):
+    return float(w0 + x @ w)
+# δ(a,b) = 1 ja a==b, citādi 0.
+def _kronecker_delta(a, b):
+    return 1 if a == b else 0
 
-    pos_feats = [(k, v) for k, v in lime_dict.items() if v > 0]
-    neg_feats = [(k, v) for k, v in lime_dict.items() if v < 0]
+# Atgriež pilnu atribūtu vektoru no LIME skaidrojuma. Neizmantotās iezīmes ir ar vērtējumu 0
+def _attribution_vector(explanation, feature_names):
+    w, _ = _get_surrogate_weights_and_intercept(explanation, feature_names)
+    return w
 
-    print(f"\n  Pozitīvās iezīmes:")
-    for k, v in sorted(pos_feats, key=lambda x: x[1], reverse=True):
-        print(f"    {k:45s}  +{v:.5f}")
 
-    print(f"\n  Negatīvās iezīmes:")
-    for k, v in sorted(neg_feats, key=lambda x: x[1]):
-        print(f"    {k:45s}  {v:.5f}")
+
+# 1. FIDELITY — Cik precīzi XAI metode reproducē modeļa uzvedību.
+
+
+def evaluate_fidelity(instance, predictor, explanation, feature_names):
+   
+    print("\n")
+    print("FIDELITY")
+
+    w, w0 = _get_surrogate_weights_and_intercept(explanation, feature_names)
+
+    # P_h(x) — modeļa prognoze (score)
+    P_h = float(predictor(instance.reshape(1, -1))[0])
+
+    # P_Mh(x) — surogāta rekonstrukcija
+    P_Mh = _surrogate_score(w, w0, instance)
+
+    # Eq. 1 — Score fidelity: 1 - |P_h(x) - P_Mh(x)|
+    score_fidelity = 1.0 - abs(P_h - P_Mh)
+
+    # Eq. 2 — Decision fidelity: δ(ŷ_h, ŷ_Mh)
+    # Klases etiķetes: threshold 0.5 prognozei
+    y_h  = int(P_h  >= 0.5)
+    y_Mh = int(P_Mh >= 0.5)
+    decision_fidelity = float(_kronecker_delta(y_h, y_Mh))
+
+    verdict_score = (
+        "Augsta (>0.90)"    if score_fidelity > 0.90 else
+        "Videja (0.70-0.90)" if score_fidelity > 0.70 else
+        "Zema (<0.70)"
+    )
 
     result = {
-        "Unikālās pamata iezīmes (f_used)"  : f_used,
-        "Izmantotās iezīmes"                : sorted(used_base),
-        "Pieļaujamais skaits (f_threshold)" : f_threshold,
-        "Pārsniegums"                       : excess,
-        "λ (soda koeficients)"              : lam,
-        "F = λ * max(0, f_used - f_thresh)" : round(F_score, 4),
-        "Pozitīvo iezīmju skaits"           : len(pos_feats),
-        "Negatīvo iezīmju skaits"           : len(neg_feats),
-        "Interpretācija"                    : (
-            "Skaidrojums izmanto pieļaujamu iezīmju skaitu"
-            if F_score == 0 else
-            f"Pārāk daudz iezīmju — {excess} virs sliekšņa"
-        ),
+        "fidelity_P_h"             : round(P_h, 6),
+        "fidelity_P_Mh"            : round(P_Mh, 6),
+        "fidelity_abs_diff"        : round(abs(P_h - P_Mh), 6),
+        "fidelity_score"           : round(score_fidelity, 4),
+        "fidelity_y_h"             : y_h,
+        "fidelity_y_Mh"            : y_Mh,
+        "fidelity_decision"        : decision_fidelity,
+        "fidelity_score_verdict"   : verdict_score,
     }
-    print()
-    for k, v in result.items():
-        if k != "Izmantotās iezīmes":
-            print(f"  {k:45s}: {v}")
-    print(f"  {'Izmantotās iezīmes':45s}: {sorted(used_base)}")
+
+    print(f"  P_h(x)  [modelis]        : {result['fidelity_P_h']}")
+    print(f"  P_Mh(x) [surrogāts]      : {result['fidelity_P_Mh']}")
+    print(f"  |P_h - P_Mh|             : {result['fidelity_abs_diff']}")
+    print(f"  Score Fidelity  (Eq.1)   : {result['fidelity_score']}")
+    print(f"  y_h  (klase modelis)     : {result['fidelity_y_h']}")
+    print(f"  y_Mh (klase surrogāts)   : {result['fidelity_y_Mh']}")
+    print(f"  Decision Fidelity (Eq.2) : {result['fidelity_decision']}  "
+          f"({'sakrit' if decision_fidelity == 1.0 else 'nesakrit'})")
+    print(f"  Score verdikts           : {result['fidelity_score_verdict']}")
     return result
 
-# S metrika — skaidrojumu stabilitāte pret troksni.
-#  S = λ * (1 − similarity)
-#  similarity — Jaccard (iezīmju kopas) vai Tanimoto (svaru vektori)
-#  Maza S → stabils skaidrojums.
 
-def evaluate_S(instance, predictor, explainer, feature_names,
-               n_trials=config.EVAL_S_TRIALS,
-               noise_std=config.EVAL_S_NOISE,
-               lam=config.EVAL_LAMBDA,
-               num_features=10,
-               num_samples=500) -> dict:
-  
+# 2. SIMPLICITY - Aprēķināts kā vidējais iezīmju skaits, kuru relatīvā nozīme pārsniedz slieksni τ
+# Mazāks rezultāts = vienkāršāks skaidrojums (mazāk iezīmju).
+
+def evaluate_simplicity(explanation_full, feature_names,
+                        thresholds=(0.10, 0.05, 0.01)):
+
     print("\n")
-    print("S METRIKA — Stabilitāte")
-   
-    print(f"  Perturbācijas: {n_trials}  |  Trokšņa σ: {noise_std}")
+    print("SIMPLICITY")
+    print("\n")
 
-    exp_orig  = explainer.explain_instance(instance, predictor,
-                                           num_features=num_features,
-                                           num_samples=num_samples)
-    orig_dict = dict(exp_orig.as_list())
-    orig_set  = _feature_set(orig_dict)
+    # Atribūciju vektors f_i ∈ R^|F|
+    f_i = _attribution_vector(explanation_full, feature_names)
+    n_total = len(f_i)
+    n_nonzero = int(np.sum(np.abs(f_i) > 1e-12))
+    max_abs = np.max(np.abs(f_i))
+ 
+    result = {"simplicity_n_features_total": n_total,
+              "simplicity_n_nonzero": n_nonzero}
+ 
+    print(f"  Kopejais iezimju skaits  : {n_total}")
+    print(f"  Nenulles iezimes         : {n_nonzero}")
+    print(f"  Max |atribucija|         : {max_abs:.6f}")
+    print()
 
-    jaccard_scores, tanimoto_scores, trial_results = [], [], []
+ 
+    tau_keys = {0.10: "simplicity_tau_010",
+                0.05: "simplicity_tau_005",
+                0.01: "simplicity_tau_001"}
+    # Robežvērtības
+    for tau in thresholds:
+        if max_abs > 1e-12:
+            relative = np.abs(f_i) / max_abs
+            count = int(np.sum(relative > tau))
+        else:
+            count = 0
+ 
+        key = tau_keys.get(tau, f"simplicity_tau_{int(tau*100):03d}")
+        result[key] = count
+        print(f"  tau={tau:.2f}  iezimju skaits = {count:3d} / {n_total}")
+ 
+    print()
+    print("  Interpretacija: mazaks skaitlis = vienkarsaks skaidrojums")
+    return result
 
-    for trial in range(n_trials):
-        noise      = np.random.normal(0, noise_std, size=instance.shape)
-        inst_noisy = np.clip(instance + noise, 0, 1)
+# 3. CONSISTENCY - Pārī salīdzina divu XAI metožu skaidrojumus, izmantojot Spearman ranga korelāciju progresīvos dziļumos n=1..k
 
-        exp_noisy  = explainer.explain_instance(inst_noisy, predictor,
-                                                num_features=num_features,
-                                                num_samples=num_samples)
-        noisy_dict = dict(exp_noisy.as_list())
-        noisy_set  = _feature_set(noisy_dict)
 
-        j = _jaccard(orig_set, noisy_set)
+def evaluate_consistency(explanation_1, explanation_2,
+                         feature_names, k=5,
+                         name_1="LIME_run_1", name_2="LIME_run_2"):
 
-        combined_keys = sorted(orig_set | noisy_set)
-        v_orig  = np.array([orig_dict.get(k, 0.0)  for k in combined_keys])
-        v_noisy = np.array([noisy_dict.get(k, 0.0) for k in combined_keys])
-        t = _tanimoto(v_orig, v_noisy)
+    print("\n")
+    print("CONSISTENCY")
+    print(f"  Metode 1 : {name_1}")
+    print(f"  Metode 2 : {name_2}")
+    print(f"  k        : {k}")
 
-        jaccard_scores.append(j)
-        tanimoto_scores.append(t)
-        trial_results.append({
-            "Mēģinājums"     : trial + 1,
-            "Jaccard"        : round(j, 4),
-            "Tanimoto"       : round(t, 4),
-            "Kopīgas iezīmes": sorted(orig_set & noisy_set),
-            "Jaunās iezīmes" : sorted(noisy_set - orig_set),
-            "Pazudušās"      : sorted(orig_set - noisy_set),
-        })
-        print(f"  Mēģinājums {trial+1}: Jaccard={j:.4f}  Tanimoto={t:.4f}  "
-              f"kopīgas={len(orig_set & noisy_set)}/{len(orig_set | noisy_set)}")
+    f1 = _attribution_vector(explanation_1, feature_names)
+    f2 = _attribution_vector(explanation_2, feature_names)
 
-    mean_j = np.mean(jaccard_scores)
-    mean_t = np.mean(tanimoto_scores)
+    # Rangu vektori: lielāka |atribūcija| -  zemāks rangs (1=svarīgākais)
+    rank_1 = np.argsort(np.argsort(-np.abs(f1))) + 1   # 1-based ranks
+    rank_2 = np.argsort(np.argsort(-np.abs(f2))) + 1
 
-    S_jaccard  = lam * (1 - mean_j)
-    S_tanimoto = lam * (1 - mean_t)
+    # top-n iezīmju indeksi katrai metodei
+    top_k_idx_1 = np.argsort(-np.abs(f1))[:k]
+    top_k_idx_2 = np.argsort(-np.abs(f2))[:k]
 
-    def _label(s):
-        if s < 0.10:  return "Stabils"
-        if s < 0.25:  return "Pietiekami stabils"
-        if s < 0.50:  return "Nestabils"
-        return              "Ļoti nestabils — skaidrojumi mainās ievērojami"
+    spearman_per_depth = []
+
+    print(f"\n  Spearman pa dzilumiem n=1..{k}:")
+    for n in range(1, k + 1):
+        # top-n iezīmju rangi no abām metodēm (uz kopīgās iezīmju kopas)
+        # Ņemam top-n no M1 un vērtējam rangu vektoru abus
+        top_n_1 = np.argsort(-np.abs(f1))[:n]
+        top_n_2 = np.argsort(-np.abs(f2))[:n]
+        combined = np.union1d(top_n_1, top_n_2)
+
+        r1_sub = rank_1[combined]
+        r2_sub = rank_2[combined]
+
+        if len(combined) < 2 or r1_sub.std() < 1e-9 or r2_sub.std() < 1e-9:
+            sp = 1.0 if np.array_equal(r1_sub, r2_sub) else 0.0
+        else:
+            sp = float(spearmanr(r1_sub, r2_sub).correlation)
+            if np.isnan(sp):
+                sp = 0.0
+
+        spearman_per_depth.append(sp)
+        print(f"    n={n}: Spearman = {sp:.4f}")
+
+    consistency_score = float(np.mean(spearman_per_depth))
+
+    verdict = (
+        "Aaugsts rezultāts (>0.70)"       if consistency_score > 0.70 else
+        "Videjs rezultāts (0.40-0.70)"   if consistency_score > 0.40 else
+        "Zems rezultāts (<0.40)"         if consistency_score > 0.00 else
+        "Nav korelacijas vai inversa"
+    )
+
+    print(f"\n  Top-{k} iezimes (M1): "
+          f"{[feature_names[i][:20] for i in top_k_idx_1]}")
+    print(f"  Top-{k} iezimes (M2): "
+          f"{[feature_names[i][:20] for i in top_k_idx_2]}")
+    print(f"\n  Consistency C(M1,M2) (Eq.4) : {consistency_score:.4f}")
+    print(f"  Interpretacija              : {verdict}")
 
     result = {
-        "Vidējā Jaccard līdzība"         : round(mean_j, 4),
-        "Vidējā Tanimoto līdzība"        : round(mean_t, 4),
-        "Jaccard standartnovirze"        : round(np.std(jaccard_scores),  4),
-        "Tanimoto standartnovirze"       : round(np.std(tanimoto_scores), 4),
-        "S_jaccard  = λ*(1 − mean_J)"   : round(S_jaccard,  4),
-        "S_tanimoto = λ*(1 − mean_T)"   : round(S_tanimoto, 4),
-        "Stabilitātes novērtējums (J)"  : _label(S_jaccard),
-        "Stabilitātes novērtējums (T)"  : _label(S_tanimoto),
-        "Mēģinājumu dati"               : trial_results,
-        "noise_std"                     : noise_std,
+        "consistency_score"          : round(consistency_score, 4),
+        "consistency_spearman_depths": [round(s, 4) for s in spearman_per_depth],
+        "consistency_k"              : k,
+        "consistency_verdict"        : verdict,
+        "consistency_top_k_M1"       : [feature_names[i] for i in top_k_idx_1],
+        "consistency_top_k_M2"       : [feature_names[i] for i in top_k_idx_2],
     }
-    print()
-    for k, v in result.items():
-        if k not in ("Mēģinājumu dati", "noise_std"):
-            print(f"  {k:45s}: {v}")
+    return result
+
+
+# 4. ROBUSTNESS  — Skaidrojuma stabilitāte pret mazām ieejas perturbācijām.
+# Aprēķināts kā vidējā L1 izmaiņa atribūciju vektoros pirms un pēc maza Gausa trokšņa
+
+
+def evaluate_robustness(instance, predictor, explainer, feature_names,
+                        n_trials=config.EVAL_S_TRIALS,
+                        sigma=0.01,
+                        n_features=config.LIME_TOP_FEATURES,
+                        n_samples=config.LIME_NUM_SAMPLES):
+    print("\n")
+    print("ROBUSTNESS")
+    print(f"  Perturbacijas n_trials : {n_trials}")
+    print(f"  sigma                  : {sigma}")
+
+    # Oriģinālais atribūciju vektors E(M_h, x)
+    exp_orig = explainer.explain_instance(
+        instance, predictor,
+        num_features=n_features,
+        num_samples=n_samples
+    )
+    e_orig = _attribution_vector(exp_orig, feature_names)
+
+    l1_changes = []
+
+    for t in range(n_trials):
+        # ε ~ N(0, σ²)
+        epsilon   = np.random.normal(0, sigma, size=instance.shape)
+        x_noisy   = instance + epsilon
+
+        # E(M_h, x + ε) — atribūciju vektors perturbētajai instancei
+        exp_noisy = explainer.explain_instance(
+            x_noisy, predictor,
+            num_features=n_features,
+            num_samples=n_samples
+        )
+        e_noisy = _attribution_vector(exp_noisy, feature_names)
+
+        l1 = float(np.sum(np.abs(e_orig - e_noisy)))
+        l1_changes.append(l1)
+
+        print(f"  Trial {t+1:2d}: L1 = {l1:.6f}")
+
+    robustness_score = float(np.mean(l1_changes))
+    robustness_std   = float(np.std(l1_changes))
+
+    verdict = (
+        "Augsta izturība (L1 < 0.01)"    if robustness_score < 0.01 else
+        "Videja izturība (0.01 - 0.05)"  if robustness_score < 0.05 else
+        "Zema izturība   (L1 > 0.05)"
+    )
+
+    print(f"\n  R_attr (videja L1, Eq.5) : {robustness_score:.6f}")
+    print(f"  Std L1                   : {robustness_std:.6f}")
+    print(f"  Interpretacija           : {verdict}")
+    print("  (Mazaka vertiba = augstaka izturība)")
+
+    result = {
+        "robustness_score"     : round(robustness_score, 6),
+        "robustness_std"       : round(robustness_std,   6),
+        "robustness_l1_trials" : [round(v, 6) for v in l1_changes],
+        "robustness_sigma"     : sigma,
+        "robustness_n_trials"  : n_trials,
+        "robustness_verdict"   : verdict,
+    }
     return result
