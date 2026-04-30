@@ -12,6 +12,29 @@ import data
 import recommender
 import evaluation
 
+# Atrod dziesmu, kuru sistēma visvairāk iesaka lietotājam user_idx, izslēdzot dziesmas, ko lietotājs jau ir klausījies
+def find_top_recommendation(user_idx, plays_df, user_factors, item_factors,
+                             feature_matrix, feature_names):
+   
+    already_heard = set(
+        plays_df[plays_df["user_idx"] == user_idx]["track_idx"].values
+    )
+ 
+    # CF vērtējumi visām dziesmām — ātra matricu reizināšana
+    user_vec  = user_factors[user_idx]
+    cf_scores = item_factors @ user_vec
+    cf_norm   = (cf_scores - cf_scores.min()) / (cf_scores.max() - cf_scores.min() + 1e-9)
+ 
+    # Izslēdz jau klausītās dziesmas
+    mask = np.ones(len(cf_norm), dtype=bool)
+    for idx in already_heard:
+        mask[idx] = False
+    cf_norm[~mask] = -1.0
+ 
+    top_track = int(np.argmax(cf_norm))
+    top_score = float(cf_norm[top_track])
+    return top_track, top_score
+
 
 def main():
     print("LIME XAI — Mūzikas Ieteikumu Sistēma")
@@ -50,8 +73,31 @@ def main():
     )
 
     # Lokālais LIME skaidrojums
-    TARGET_USER  = config.TARGET_USER
-    TARGET_TRACK = config.TARGET_TRACK
+    TARGET_USER = config.TARGET_USER
+    predictor   = make_predictor(TARGET_USER)
+ 
+    if config.TARGET_TRACK == -1:
+        # Automātiska izvēle — ātrais CF skoreris, NE LIME
+        print(f"\nMeklē labāko ieteikumu lietotājam {TARGET_USER} ...")
+        TARGET_TRACK, rec_score = find_top_recommendation(
+            TARGET_USER, plays_df, user_factors, item_factors,
+            feature_matrix, feature_names
+        )
+        print(f"Ieteikts: track_idx={TARGET_TRACK}  score={rec_score:.4f}")
+    else:
+        TARGET_TRACK = config.TARGET_TRACK
+        rec_score    = float(predictor(feature_matrix[[TARGET_TRACK]])[0])
+        already_heard = set(
+            plays_df[plays_df["user_idx"] == TARGET_USER]["track_idx"].values
+        )
+        if TARGET_TRACK in already_heard:
+            print(f"\n[!] Dziesma {TARGET_TRACK} jau ir lietotāja "
+                  f"{TARGET_USER} vēsturē — iestatiet TARGET_TRACK = -1 "
+                  f"lai automātiski atrastu reālu ieteikumu.")
+        print(f"\nIzmanto norādīto TARGET_TRACK={TARGET_TRACK}  "
+              f"score={rec_score:.4f}")
+
+
 
     meta = df.iloc[TARGET_TRACK]
     print(f"\nIzskaidro ieteikumu lietotājam {TARGET_USER}")
@@ -86,7 +132,7 @@ def main():
         print(f"  {sign}{feat:45s}  {weight:+.5f}")
 
     # Batch izskaidrojumi (viens paraugs katram žanram)
-        np.random.seed(config.RANDOM_SEED + 1)
+    np.random.seed(config.RANDOM_SEED + 1)
     explanation_2 = explainer.explain_instance(
         data_row    = instance,
         predict_fn  = predictor,
