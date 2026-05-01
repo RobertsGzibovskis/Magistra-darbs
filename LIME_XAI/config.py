@@ -3,11 +3,10 @@
 # Šo failu importē visi pārējie moduļi
 
 import os
-import matplotlib.pyplot as plt
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-CSV   = os.path.join(_HERE, "spotify_2015_2025_85k.csv")   # datu kopa
-OUT   = os.path.join(_HERE, "lime_izvades_faili")           # grafiku mape
+CSV   = os.path.join(_HERE, "data.csv")   # galvenā datu kopa
+OUT   = os.path.join(_HERE, "lime_izvades_faili")
 os.makedirs(OUT, exist_ok=True)
 
 # Modeļa parametri
@@ -24,8 +23,11 @@ LIME_TOP_FEATURES = 8
 LIME_NUM_SAMPLES  = 2000
 LIME_BACKGROUND_N = 2000   # paraugu skaits matricai
 
-# Novērtēšanas parametri
 
+# Ieteicams: 20000
+TRACK_SAMPLE_N = 20_000
+
+# Novērtēšanas parametri
 
 EVAL_D_SAMPLES    = 300
 EVAL_D_NOISE      = 0.05
