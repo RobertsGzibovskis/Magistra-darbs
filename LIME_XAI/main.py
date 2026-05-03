@@ -46,12 +46,11 @@ def main():
 
     # 2. Lietotāju simulācija
 
-    plays_df, R, user_decade, user_energy = data.simulate_users(
+    plays_df, R, user_prefs = data.simulate_users(
         df, feature_matrix,
         n_users=config.N_USERS,
         seed=config.RANDOM_SEED
     )
-
 
     # SVD modelis
     user_factors, item_factors = recommender.build_svd_model(
@@ -103,8 +102,9 @@ def main():
 
     meta = df.iloc[TARGET_TRACK]
     print(f"\nIzskaidro ieteikumu lietotājam {TARGET_USER}")
-    print(f"  Lietotāja preference : dekāde={user_decade[TARGET_USER]}  "
-          f"enerģija={user_energy[TARGET_USER]}")
+    print(f"  Lietotāja preferences:")
+    for pref, label in data.PREF_LABELS.items():
+        print(f"    {label:15s}: {user_prefs[pref][TARGET_USER]}")
     print(f"  Dziesma    : {meta['name']}")
     print(f"  Izpildītājs: {meta['artist_name']}")
     print(f"  Gads       : {int(meta['year'])}  |  Dekāde: {int(meta['decade'])}")
