@@ -1,4 +1,4 @@
-# shap_main.py — SHAP SamplingExplainer versija (lokāls skaidrojums)
+# shap_main.py — SHAP SamplingExplainer
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -68,6 +68,8 @@ def main():
     instance_core = fm_core[TARGET_TRACK]
 
     print(f"\nIeteikums lietotājam {TARGET_USER}")
+    print(f"  Era-dev     : energy_vs_era={meta['energy_vs_era']:+.3f}  "
+          f"valence_vs_era={meta['valence_vs_era']:+.3f}")
     print(f"  Preferences :")
     for pref, label in data.PREF_LABELS.items():
         print(f"    {label:15s}: {user_prefs[pref][TARGET_USER]}")

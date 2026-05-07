@@ -71,7 +71,7 @@ PREF_LABELS = {
 }
 
 
-# ── Palīgfunkcijas ────────────────────────────────────────────────────────────
+# Palīgfunkcijas
 
 def _parse_first_artist(raw) -> str:
     try:

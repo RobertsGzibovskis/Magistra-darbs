@@ -75,7 +75,7 @@ def make_scorer(user_factors: np.ndarray,
 
             content   = float(cosine_similarity(full_fvec.reshape(1, -1), user_profile.reshape(1, -1))[0, 0])
             pop_boost = full_fvec[pop_idx] * 0.05
-            scores[i] = np.clip(0.55 * cf + 0.40 * content + pop_boost, 0, 1)
+            scores[i] = np.clip(0.60 * cf + 0.40 * content + pop_boost, 0, 1)
 
         return scores
 

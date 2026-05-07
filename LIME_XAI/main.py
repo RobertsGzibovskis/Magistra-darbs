@@ -15,6 +15,41 @@ import data
 import recommender
 import evaluation
 
+# Izveido un saglabā LIME skaidrojuma grafiku.
+def plot_lime_explanation(explanation, user_id, track_name, out_path):
+    
+    exp_list = explanation.as_list()
+    # Sakārtojam, lai svarīgākās iezīmes būtu augšpusē
+    exp_list.sort(key=lambda x: abs(x[1]), reverse=False) 
+    
+    features = [x[0] for x in exp_list]
+    weights = [x[1] for x in exp_list]
+    
+    # Definējam krāsas: zaļš pozitīviem, sarkans negatīviem
+    colors = ['green' if w > 0 else 'red' for w in weights]
+
+    plt.figure(figsize=(10, 6))
+    bars = plt.barh(features, weights, color=colors, alpha=0.7)
+    
+    # Pievienojam vertikālu līniju pie 0
+    plt.axvline(x=0, color='black', linestyle='-', linewidth=0.8)
+    
+    plt.xlabel('Iezīmes ietekme uz ieteikuma punktiem (Weight)')
+    plt.title(f'LIME Skaidrojums: {track_name}\n(Lietotājs {user_id})')
+    plt.grid(axis='x', linestyle='--', alpha=0.6)
+    
+    # Pievienojam vērtības joslu galos precizitātei
+    for bar in bars:
+        width = bar.get_width()
+        label_x_pos = width if width > 0 else width - 0.005
+        plt.text(label_x_pos, bar.get_y() + bar.get_height()/2, 
+                 f'{width:+.5f}', va='center', fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(out_path)
+    print(f"  [Vizuālais skaidrojums saglabāts]: {out_path}")
+    plt.close()
+
 # Atrod dziesmu, kuru sistēma visvairāk iesaka lietotājam user_idx, izslēdzot dziesmas, ko lietotājs jau ir klausījies
 def find_top_recommendation(user_idx, plays_df, user_factors, item_factors):
     already_heard = set(
@@ -142,6 +177,18 @@ def main():
         sign  = "+" if weight > 0 else "-"
         group = _feature_group(feat)
         print(f"  {sign}  [{group:8s}]  {feat:42s}  {weight:+.5f}")
+
+    safe_track_name = "".join([c if c.isalnum() else "_" for c in meta['name']])
+    out_img_name = f"lime_user{TARGET_USER}_{safe_track_name}.png"
+    out_img_path = os.path.join(config.OUT, out_img_name)
+
+    # Izsaucam vizualizācijas funkciju
+    plot_lime_explanation(
+        explanation=explanation,
+        user_id=TARGET_USER,
+        track_name=meta['name'],
+        out_path=out_img_path
+    )
 
     # LIME skaidrojums #2 (Konsistencei ar mainītu seed)
     np.random.seed(config.RANDOM_SEED + 1)

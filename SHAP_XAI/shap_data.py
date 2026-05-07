@@ -44,6 +44,7 @@ PREF_LABELS = {
     "popularity"  : "Popularitāte",
 }
 
+ERA_DEV_FEATURES = ["energy_vs_era", "valence_vs_era"]
 # Palīgfunkcijas
 
 
@@ -56,9 +57,6 @@ def _parse_artists(raw) -> str:
 
  # Preferneču maska
 def _preference_mask(df: pd.DataFrame, pref: str, value: str) -> np.ndarray:
-
-    if pref == "decade":
-        return (df["decade"] == int(value)).values
     if pref == "energy":
         return (df["energy"] >= 0.60).values if value == "high" \
                else (df["energy"] < 0.60).values
@@ -71,6 +69,9 @@ def _preference_mask(df: pd.DataFrame, pref: str, value: str) -> np.ndarray:
     if pref == "popularity":
         return (df["popularity"] >= 40).values if value == "mainstream" \
                else (df["popularity"] < 40).values
+    if pref == "era":
+        return (df["year"] < 1990).values if value == "classic" \
+               else (df["year"] >= 1990).values
     return np.ones(len(df), dtype=bool)
 
 
@@ -84,28 +85,38 @@ def load_tracks(csv_path: str) -> pd.DataFrame:
     if config.TRACK_SAMPLE_N is not None:
         df = df.sample(n=min(config.TRACK_SAMPLE_N, len(df)),
                        random_state=config.RANDOM_SEED).reset_index(drop=True)
-        print(f"  [Paraugs: {len(df):,} no visiem ierakstiem]")
-
-    print(f"  Rindas: {len(df):,}  |  Kolonnas: {df.columns.tolist()}")
 
     df["artist_name"] = df["artists"].apply(_parse_artists)
     df["duration_min"] = df["duration_ms"] / 60_000
     df["decade"]       = (df["year"] // 10) * 10
 
+    # 2. APRĒĶINĀM ERA-DEV IEZĪMES
+    # Atrodam vidējo enerģiju un noskaņojumu katrai dekādei
+    era_stats = df.groupby("decade")[["energy", "valence"]].mean().reset_index()
+    era_stats.columns = ["decade", "avg_energy", "avg_valence"]
+    
+    # Pievienojam statistiku galvenajam df
+    df = df.merge(era_stats, on="decade", how="left")
+    
+    # Aprēķinām nobīdi (dziesmas vērtība mīnus dekādes vidējā)
+    df["energy_vs_era"]  = df["energy"] - df["avg_energy"]
+    df["valence_vs_era"] = df["valence"] - df["avg_valence"]
+
     print(f"  Gadi    : {int(df['year'].min())} – {int(df['year'].max())}")
-    print(f"  Dekādes : {sorted(df['decade'].unique().tolist())}")
     return df
 
 
 # Izveido vienumu īpašību matricu
 
 def build_feature_matrix(df: pd.DataFrame):
+    # 3. PIEVIENOJAM ERA-DEV MATRICAI
     key_ohe    = pd.get_dummies(df["key"],    prefix="key")
     decade_ohe = pd.get_dummies(df["decade"], prefix="dec")
 
     raw = pd.concat([
         df[CONTINUOUS].reset_index(drop=True),
         df[BINARY].reset_index(drop=True),
+        df[ERA_DEV_FEATURES].reset_index(drop=True), # Pievienojam šeit
         key_ohe.reset_index(drop=True),
         decade_ohe.reset_index(drop=True),
     ], axis=1).astype(float)
@@ -113,12 +124,6 @@ def build_feature_matrix(df: pd.DataFrame):
     feature_names  = raw.columns.tolist()
     scaler         = MinMaxScaler()
     feature_matrix = scaler.fit_transform(raw)
-
-    print(f"\nVienumu Matrica: {feature_matrix.shape}")
-    print(f"  Continuous : {CONTINUOUS}")
-    print(f"  Binary     : {BINARY}")
-    print(f"  OHE dims   : key={len(key_ohe.columns)}  decade={len(decade_ohe.columns)}")
-
     return feature_matrix, feature_names, scaler
 
 
