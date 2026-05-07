@@ -5,7 +5,10 @@
 import os
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-CSV   = os.path.join(_HERE, "data.csv")   # galvenā datu kopa
+CSV          = os.path.join(_HERE, "data.csv")
+CSV_GENRES   = os.path.join(_HERE, "data_w_genres.csv")
+CSV_BY_YEAR  = os.path.join(_HERE, "data_by_year.csv")
+
 OUT   = os.path.join(_HERE, "lime_izvades_faili")
 os.makedirs(OUT, exist_ok=True)
 
@@ -17,10 +20,10 @@ RANDOM_SEED  = 42
 
 # LIME XAI parametri
 
-TARGET_USER  = 1      # lietotājs, kuram tiek skaidrots ieteikums
+TARGET_USER  = 2      # lietotājs, kuram tiek skaidrots ieteikums
 TARGET_TRACK = -1   # dziesma, kurai tiek skaidrots ieteikums
-LIME_TOP_FEATURES = 8
-LIME_NUM_SAMPLES  = 2000
+LIME_TOP_FEATURES = 10
+LIME_NUM_SAMPLES  = 5000
 LIME_BACKGROUND_N = 2000   # paraugu skaits matricai
 
 
