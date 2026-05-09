@@ -5,6 +5,7 @@ warnings.filterwarnings("ignore")
 
 import sys
 import numpy as np
+import matplotlib.pyplot as plt
 
 import shap_config as config
 sys.modules["config"] = config
@@ -105,6 +106,43 @@ def main():
     print(f"  {'-'*55}")
     for i in top_idx:
         print(f"  {CORE_FEATURES[i]:25s}  {sv1[i]:+.5f}")
+
+    top_features = [CORE_FEATURES[i] for i in top_idx]
+    top_values   = [sv1[i] for i in top_idx]
+
+    # Krāsas
+    colors = ["green" if v > 0 else "red" for v in top_values]
+
+    plt.figure(figsize=(10, 5))
+
+    bars = plt.barh(top_features, top_values, color=colors)
+
+    # Pievieno SHAP vērtības pie stabiņiem
+    for bar, value in zip(bars, top_values):
+        plt.text(
+            value,
+            bar.get_y() + bar.get_height()/2,
+            f"{value:+.5f}",
+            va='center'
+        )
+
+    # Nulles līnija
+    plt.axvline(0, linestyle="--")
+
+    xmin = min(top_values) * 1.35
+    xmax = max(top_values) * 1.15
+
+    plt.xlim(xmin, xmax)
+
+    plt.xlabel("SHAP Vērtība (Iezīmju ieguldījums)")
+    plt.ylabel("Iezīmes")
+    plt.title(f"Top-{config.SHAP_TOP_FEATURES} SHAP Iezīmju ieguldījums")
+
+    # Lielākā vērtība augšā
+    plt.gca().invert_yaxis()
+
+    plt.tight_layout()
+    plt.show()
 
     # 6. Novērtēšanas metrikas
     print("NOVĒRTĒŠANAS METRIKAS")

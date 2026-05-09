@@ -13,11 +13,11 @@ RANDOM_SEED    = 42
 TRACK_SAMPLE_N = 20_000
 
 # SHAP parametri
-TARGET_USER         = 1
-TARGET_TRACK        = 18696
+TARGET_USER         = 2
+TARGET_TRACK        = 13674
 SHAP_BACKGROUND_N   = 2000    # fona paraugu skaits SamplingExplainer
 SHAP_TOP_FEATURES   = 8
 SHAP_LOCAL_NSAMPLES = 5000   # Paraugi uz vienu SHAP izsaukumu
 
 # Novērtēšanas parametri
-EVAL_S_TRIALS = 7            # Perturbāciju skaits
+EVAL_S_TRIALS = 1           # Perturbāciju skaits

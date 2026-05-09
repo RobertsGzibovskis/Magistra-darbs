@@ -33,6 +33,7 @@ def plot_lime_explanation(explanation, user_id, track_name, out_path):
     
     # Pievienojam vertikālu līniju pie 0
     plt.axvline(x=0, color='black', linestyle='-', linewidth=0.8)
+
     
     plt.xlabel('Iezīmes ietekme uz ieteikuma punktiem (Weight)')
     plt.title(f'LIME Skaidrojums: {track_name}\n(Lietotājs {user_id})')
@@ -44,7 +45,11 @@ def plot_lime_explanation(explanation, user_id, track_name, out_path):
         label_x_pos = width if width > 0 else width - 0.005
         plt.text(label_x_pos, bar.get_y() + bar.get_height()/2, 
                  f'{width:+.5f}', va='center', fontsize=9)
+        
+    xmin = min(weights) * 1.25 if min(weights) < 0 else -0.01
+    xmax = max(weights) * 1.15 if max(weights) > 0 else 0.01
 
+    plt.xlim(xmin, xmax)
     plt.tight_layout()
     plt.savefig(out_path)
     print(f"  [Vizuālais skaidrojums saglabāts]: {out_path}")

@@ -20,7 +20,7 @@ RANDOM_SEED  = 42
 
 # LIME XAI parametri
 
-TARGET_USER  = 1      # lietotājs, kuram tiek skaidrots ieteikums
+TARGET_USER  = 2     # lietotājs, kuram tiek skaidrots ieteikums
 TARGET_TRACK = -1   # dziesma, kurai tiek skaidrots ieteikums
 LIME_TOP_FEATURES = 10
 LIME_NUM_SAMPLES  = 5000

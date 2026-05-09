@@ -16,7 +16,7 @@ CORE_FEATURES = [
     "instrumentalness", "popularity", "duration_min",
     "valence", "acousticness", "liveness", "speechiness",
     "year", "explicit", "mode"
-] + data.ERA_DEV_FEATURES # Pievienojam energy_vs_era, valence_vs_era utt.
+] #+ data.ERA_DEV_FEATURES # Pievienojam energy_vs_era, valence_vs_era
 
 def build_svd_model(R: csr_matrix, n_components=config.SVD_COMPONENTS, seed=config.RANDOM_SEED):
     svd = TruncatedSVD(n_components=n_components, random_state=seed)

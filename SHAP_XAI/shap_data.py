@@ -207,8 +207,5 @@ def simulate_users(df: pd.DataFrame,
     print(f"\nLietotāji: {n_users}  |  Mijiedarbības: {len(plays_df):,}")
     print(f"  Vidēji dziesmas uz lietotāju : {len(plays_df)/n_users:.1f}")
     print()
-    print("  Lietotāja 0 preferences (piemērs):")
-    for pref, label in PREF_LABELS.items():
-        print(f"    {label:15s}: {user_prefs[pref][0]}")
 
     return plays_df, R, user_prefs

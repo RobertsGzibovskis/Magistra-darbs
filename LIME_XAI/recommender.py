@@ -54,8 +54,8 @@ def make_scorer(user_factors: np.ndarray,
         scores = np.zeros(len(feature_batch))
         
         for i, fvec in enumerate(feature_batch):
-            # Tā kā LIME tagad sūta perturbētus vektorus BEZ žanriem (īsākus),
-            # mums tie ir jāpapildina līdz pilnajam izmēram ar target dziesmas žanriem fona aprēķiniem.
+            # Tā kā LIME tagad sūta perturbētus vektorus bez žanriem (īsākus),
+            # tie ir jāpapildina līdz pilnajam izmēram ar target dziesmas žanriem fona aprēķiniem.
             if len(fvec) < len(feature_names):
                 full_fvec = np.zeros(len(feature_names))
                 full_fvec[:len(fvec)] = fvec
@@ -95,7 +95,7 @@ def build_lime_explainer(feature_matrix: np.ndarray,
     # Atrodam robežu, kur beidzas audio/laikmeta/binārās iezīmes un sākas žanri
     non_genre_indices = [i for i, name in enumerate(feature_names) if not name.startswith("genre_")]
     
-    # Filtrējam fona datus — padodam LIME tikai iezīmes BEZ žanriem
+    # Filtrējam fona datus — padodam LIME tikai iezīmes bez žanriem
     filtered_matrix = feature_matrix[:, non_genre_indices]
     filtered_names = [feature_names[i] for i in non_genre_indices]
 
