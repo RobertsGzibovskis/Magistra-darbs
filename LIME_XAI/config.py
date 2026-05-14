@@ -22,7 +22,7 @@ RANDOM_SEED  = 42
 
 TARGET_USER  = 2     # lietotājs, kuram tiek skaidrots ieteikums
 TARGET_TRACK = -1   # dziesma, kurai tiek skaidrots ieteikums
-LIME_TOP_FEATURES = 10
+LIME_TOP_FEATURES = 8
 LIME_NUM_SAMPLES  = 5000
 LIME_BACKGROUND_N = 2000   # paraugu skaits matricai
 

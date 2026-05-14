@@ -17,7 +17,7 @@ TARGET_USER         = 2
 TARGET_TRACK        = 13674
 SHAP_BACKGROUND_N   = 2000    # fona paraugu skaits SamplingExplainer
 SHAP_TOP_FEATURES   = 8
-SHAP_LOCAL_NSAMPLES = 5000   # Paraugi uz vienu SHAP izsaukumu
+SHAP_LOCAL_NSAMPLES = 500   # Paraugi uz vienu SHAP izsaukumu
 
 # Novērtēšanas parametri
 EVAL_S_TRIALS = 1           # Perturbāciju skaits
