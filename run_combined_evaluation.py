@@ -25,8 +25,8 @@ sys.modules["config"] = lime_config
 # Konfigurācija 
 
 EVAL_USERS = list(range(1, 51))
-EVAL_TOP_TRACKS = 1
-EVAL_RUNS       = 1
+EVAL_TOP_TRACKS = 3
+EVAL_RUNS       = 4
 OUT_DIR         = lime_config.OUT
 
 METRIC_COLS = [
